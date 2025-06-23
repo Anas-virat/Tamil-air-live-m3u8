@@ -1,70 +1,68 @@
 <?php
-// Don't timeout or quit
 set_time_limit(0);
 ignore_user_abort(true);
 
-// Stream input and channel name
-$url = "https://air-stream-ts.onrender.com/box.ts?id=3"; // ✅ Your TS URL
-$channel = "SonyYay"; // ✅ Folder name (channel)
+$url = "https://air-stream-ts.onrender.com/box.ts?id=3";
+$channel = "SonyYay";
 
-// Constants
-$segmentDuration = 10; // 10 seconds per segment
+$segmentDuration = 10; // seconds
 $maxSegments = 6;
+$folder = __DIR__ . "/$channel";
 
-// Output folder
-$baseFolder = __DIR__ . "/$channel";
-if (!is_dir($baseFolder)) mkdir($baseFolder, 0777, true);
+if (!is_dir($folder)) mkdir($folder, 0777, true);
 
-// Filenames
 $segmentPrefix = "segment_";
-$playlistFile = "$baseFolder/playlist.m3u8";
+$playlistFile = "$folder/playlist.m3u8";
 
 $segmentIndex = 0;
 $segmentList = [];
 
-echo "▶ Starting segmenter...\n";
-echo "🌐 Source: $url\n📁 Saving to: $baseFolder\n";
+echo "🚀 Faster segmenter starting...\n";
 
-// Infinite loop
 while (true) {
-    $startTime = microtime(true);
-    $segmentFile = "$baseFolder/{$segmentPrefix}{$segmentIndex}.ts";
+    $segmentFile = "$folder/{$segmentPrefix}{$segmentIndex}.ts";
+    echo "📦 Creating: $segmentFile\n";
 
-    echo "📦 Writing: $segmentFile\n";
+    $read = fopen($url, 'r');
+    $write = fopen($segmentFile, 'w');
 
-    // Open stream to read
-    $stream = fopen($url, 'r');
-    $output = fopen($segmentFile, 'w');
-
-    if (!$stream || !$output) {
-        echo "❌ Stream/File error. Retrying in 5 seconds...\n";
-        sleep(5);
+    if (!$read || !$write) {
+        echo "❌ Error opening stream. Retrying in 3s...\n";
+        sleep(3);
         continue;
     }
 
-    // Read TS data for 10 seconds
-    while ((microtime(true) - $startTime) < $segmentDuration) {
-        $data = fread($stream, 8192);
+    // ⚡ Make reading faster
+    stream_set_timeout($read, 2);
+    stream_set_blocking($read, true);
+
+    $start = microtime(true);
+    $bytesWritten = 0;
+
+    while ((microtime(true) - $start) < $segmentDuration) {
+        $data = fread($read, 16384); // 16 KB chunk
         if (!$data) break;
-        fwrite($output, $data);
+        $bytesWritten += strlen($data);
+        fwrite($write, $data);
     }
 
-    fclose($stream);
-    fclose($output);
+    fclose($read);
+    fclose($write);
 
-    // Update segment list
+    echo "✅ Segment saved ($bytesWritten bytes)\n";
+
+    // Maintain segment list
     $segmentList[] = "{$segmentPrefix}{$segmentIndex}.ts";
     if (count($segmentList) > $maxSegments) {
         $old = array_shift($segmentList);
-        @unlink("$baseFolder/$old");
+        @unlink("$folder/$old");
     }
 
-    // Build M3U8
+    // Write M3U8 playlist
     $m3u8 = "#EXTM3U\n";
     $m3u8 .= "#EXT-X-VERSION:3\n";
     $m3u8 .= "#EXT-X-TARGETDURATION:$segmentDuration\n";
     $m3u8 .= "#EXT-X-MEDIA-SEQUENCE:" . ($segmentIndex - count($segmentList) + 1) . "\n";
-
     foreach ($segmentList as $seg) {
         $m3u8 .= "#EXTINF:$segmentDuration,\n$seg\n";
     }
